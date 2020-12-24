@@ -1,0 +1,642 @@
+---
+title: "Práctica 2: Limpieza y análisis de datos"
+author: "Autores: Fernando García Dorador, Amanda Iglesias Moreno"
+date: "24/12/2020"
+output:
+  html_document:
+    highlight: default
+    number_sections: yes
+    theme: cosmo
+    toc: yes
+    toc_depth: 2
+  word_document: default
+  pdf_document:
+    highlight: zenburn
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Descripción del dataset. ¿Por qué es importante y qué pregunta/problema pretende responder?
+
+Google Play es la plataforma de distribución digital de Android para aplicaciones móviles y desde su fecha de lanzamiento hace poco más de 10 años crece de manera imparable ofreciendo al público aplicaciones en un amplio abanico de categorías desde apps financieras hasta aplicaciones dedicadas al bienestar emocional y la salud. 
+
+El conjunto de datos analizado se encuentra en Kaggle y contiene información sobre aproximadamente 10.000 aplicaciones diponibles en Googleplay. Entre las varibles presentes en del dataset encontramos:
+
+* **App**: nombre de la aplicación
+* **Category**: categoría temática a la que pertenece (existen 33 categorías)
+* **Rating**: calificación de la app por parte de los usuarios (rango de 0 a 5)
+* **Reviews**: número de reviews realizadas por parte de los usuarios de Googleplay
+* **Size**: dimensiones de la app
+* **Installs**: número de descargas
+* **Type**: variable que indica si la aplicación es gratuíta o por el contrario de pago
+* **Price**: precio de la app
+* **Content Rating**: grupo de edad al que esta destinado la aplicación
+* **Genre**: géneros (1 o varios) al que pertenece la aplicación
+* **Last updated**: fecha de la última actualización de la aplicación
+* **Curent Version**: versión de la aplicación
+* **Android Version**: versión Android de la aplicación
+
+En esta práctica, examinaremos que características son más representativas de las aplicaciones de la plataforma, haciendo hincapié en el análisis de las calificaciones. A partir de este conjunto de datos se pretende analizar la distribución de las puntaciones, determinando que características influyen en las mismas así como que variables carecen de relevancia. De esta manera, futuros desarrolladores informáticos podrán utilizar estos insights para crear apps de calidad que sean reconocidas por el amplio y creciente público que hace uso de Google Play.
+
+# Integración y selección de los datos de interés a analizar.
+## Integración
+Los datos con los que vamos a trabajar en esta prácica provienen de un único fichero "*googleplaystore.csv*", obtenido en la base de datos de kaggle: 
+
+```{r message= FALSE, warning=FALSE}
+google_play <- read.csv("googleplaystore.csv")
+
+```
+## Selección
+En este proyecto nos interesa analizar toda la población de datos, por lo que no se realizará un filtrado de los datos.
+
+Por otra parte, nos parece interesante analizar si el hecho de que una aplicación pertenezca a más de un género afecta a su rating. A continuación, creamos la variable *Multi_Genre*, que tomará valor 1 si tiene más de un género asociado o 0 en caso contrario:
+
+```{r message= FALSE, warning=FALSE}
+Multi_Genre <- lapply(google_play$Genres, function(x) ifelse(grepl(";", x, fixed = TRUE), "yes", "no"))
+
+google_play$Multi_Genre <- as.character(Multi_Genre)
+
+```
+
+# Limpieza de los datos
+
+Una vez leídos los datos, analizamos la estructura y tipología de los datos mediante la función *str*. También importamos la librería *DataExplorer* que nos ayudará a realizar un análisis exploratorio visual posteriormente:
+```{r message= FALSE, warning=FALSE}
+library(DataExplorer) 
+str(google_play)
+```
+
+Observamos que todas las variables menos *Rating* están en formato *chr*. De estas variables, algunas pueden convertirse a valor númerico como *Size*, *Reviews* y *Price*, y algunas otras se podrán discretizar si tienen pocos valores únicos.
+
+A continuación realizamos un gráfico de barras de las variables con formato *chr* que tienen pocas categorías:
+```{r message= FALSE, warning=FALSE}
+plot_bar(google_play)
+```
+
+vemos que hay 2 de las variables (Installs y Type) tienen categorías que no deberían. Analizamos en concreto las filas donde esto ocurre:
+```{r message= FALSE, warning=FALSE}
+google_play[google_play$Installs == "Free",]
+
+#eliminamos elemento 10473, ya que las columnas no están en orden y falta un campo
+googleplay_clean <- google_play[-c(10473),]
+```
+
+Eliminamos la fila donde ocurría, puesto vemos que se ha movido y faltan campos. A continuación, analizamos el caso donde Installs es 0:
+
+```{r message= FALSE, warning=FALSE}
+str(googleplay_clean[googleplay_clean$Installs == "0",])
+
+
+#se trata de un error y le añadimos el + al final para que tenga la misma estructura que los demás
+googleplay_clean$Installs[googleplay_clean$Installs == '0'] <- "0+"
+googleplay_clean$Type[googleplay_clean$Type == "NaN"] <- "Free"
+
+# Los datos que están en la categoría de Installs = "0+" quiere decir que no han sido instalados y por ello no tienen rating,
+# eliminaremos estas observaciones del dataset puesto que nuestro objetivo es estudiar el rating de aquellas aplicaciones instaladas.
+
+googleplay_clean <- googleplay_clean[googleplay_clean$Installs != "0+",]
+dim(googleplay_clean)
+```
+
+Hemos comprobado que se trataba de un error de formato, además se ha sustitudo el valor de Type a "Free", puesto que el precio es 0. Además, hemos decidido eliminar aquellas aplicaciones de nuestro dataset que no han sido instaladas (15 del total).
+
+Por último, vamos a comprobar si existen valores duplicados en nuestro dataset, y en caso afirmativo, estudiaremos como tratarlos:
+
+```{r message= FALSE, warning=FALSE}
+library(dplyr)
+googleplay_clean <- googleplay_clean[!duplicated(googleplay_clean), ] #Con esta linea eliminamos las filas exactamente iguales
+
+#Añadimos un contador para ver cuantas lineas se repiten
+googleplay_clean <- add_count(googleplay_clean, App)
+googleplay_clean <- googleplay_clean[order(googleplay_clean$App),]
+head(googleplay_clean[googleplay_clean$n > 1,])
+```
+
+Podemos observar que tras eliminar las filas exactamente iguales, aun quedan aplicaciones duplicadas con todas las columnas iguales menos *Reviews*, que varía ligeramente. Con el objetivo de obtener un estudio más preciso, escogeremos aquella fila que tiene el número máximo de reviews, que requerirá una conversión prévia de la variable a tipo numérico:
+
+```{r message= FALSE, warning=FALSE}
+require(data.table)
+googleplay_clean <- as.data.table(googleplay_clean)
+googleplay_clean$Reviews <- as.numeric(googleplay_clean$Reviews)
+
+googleplay_clean <- googleplay_clean[googleplay_clean[, .I[which.max(Reviews)], by=App]$V1] #seleccionamos fila con más reviews
+googleplay_clean <- googleplay_clean[, n := NULL] #eliminamos la columna contador
+print(dim(googleplay_clean))
+print(length(unique(googleplay_clean$App)))
+```
+
+Una vez eliminadas las filas duplicadas, observamos que la dimensión de nuestros datos coincide con el número de aplicaciones diferentes que tenemos.
+
+## Conversión de tipos de variables
+### Conversión de Size
+
+Ahora realizaremos el preprocesado de la variable size, que consistirá en transformar el tipo de datos a numérico. Para ello, primero eliminaremos las "M" y "k" de los valores, que indican megabytes y kilobytes respectivamente, y sustituiremos el valor "Varies with device" por NaN, para posteriormente extrapolar este valor utilizando kNN:
+
+```{r message= FALSE, warning=FALSE}
+mask1 <- grepl("[M]$", googleplay_clean$Size)
+mask2 <- grepl("[k]$", googleplay_clean$Size)
+
+googleplay_clean$Size <- lapply(googleplay_clean$Size, function(x) gsub("[M]$", "", x))
+googleplay_clean$Size <- lapply(googleplay_clean$Size, function(x) gsub("[k]$", "", x))
+googleplay_clean$Size <- lapply(googleplay_clean$Size, function(x) gsub("Varies with device", "NaN", x))
+
+googleplay_clean$Size <- as.numeric(googleplay_clean$Size)
+googleplay_clean$Size <- (1000*mask2*googleplay_clean$Size) + (1000000*mask1*googleplay_clean$Size)
+
+str(googleplay_clean$Size)
+
+```
+
+### Conversión de Price
+
+Hemos observado que la variable *Price* está en formato chr, nuestro objetivo es convertirla a valor numérico. Para conseguirlo, debemos eliminar el símbolo del $ que acompaña a los precios:
+```{r message= FALSE, warning=FALSE}
+
+googleplay_clean$Price <- lapply(googleplay_clean$Price, function(x) gsub("\\$", "", x))
+googleplay_clean$Price <- as.numeric(googleplay_clean$Price)
+
+str(googleplay_clean$Price)
+```
+
+
+### Conversión de Reviews
+
+Esta variable estaba en formato *chr* y fue convertida en formato númerico en el apartado anterior.
+
+### Conversión de Last.updated
+
+```{r message= FALSE, warning=FALSE}
+library(lubridate)
+Time <- lapply(googleplay_clean$Last.Updated, function(x) parse_date_time(x,orders = "mdy"))
+
+googleplay_clean$Last.Updated <- as.POSIXct(unlist(Time), origin = '1970-01-01')
+googleplay_clean$Last.Updated <- as.character(ceiling_date(googleplay_clean$Last.Updated, "day"))
+head(googleplay_clean)
+```
+
+
+## Análisis de valores perdidos
+Ahora nos centraremos en el tratamiento de valores perdidos:
+```{r message= FALSE, warning=FALSE}
+colSums(is.na(googleplay_clean))
+plot_missing(googleplay_clean)
+```
+
+Las variables *Size* y *Rating* tienen valores perdidos. Puesto que la eliminicaión del las filas donde hay valores nulos supondría la pérdida de un 15,64% de los datos que disponemos, no podemos considerarlo como una opción. En su lugar, imputaremos los datos perdidos utilizando la librería *mice*, concretamente el *predictive mean matching*:
+
+```{r message= FALSE, warning=FALSE, include = FALSE}
+library(mice)
+
+tmpData <- mice(googleplay_clean, m=5, maxit = 50, method = 'pmm', seed = 500)
+
+```
+
+```{r message= FALSE, warning=FALSE}
+summary(tmpData)
+
+data_clean <- complete(tmpData,1)
+```
+
+Verificamos que no hay ningún valor perdido:
+```{r message= FALSE, warning=FALSE}
+colSums(is.na(data_clean))
+```
+
+## Discretización de variable categóricas
+
+Antes de discretizar en categorías las variables *chr*, primero analizamos el número de valores diferentes que tiene cada variable:
+
+```{r message= FALSE, warning=FALSE}
+# ¿Con qué variables tendría sentido un proceso de discretización?
+apply(data_clean,2, function(x) length(unique(x)))
+```
+
+A partir de estos números, determinamos que será efectivo discretizar las variables *Category*, *Installs*, *Type*, *Content.rating*, *Android.Ver* y *Multi_Genre*:
+
+```{r message= FALSE, warning=FALSE}
+# Discretizamos las variables con pocas clases
+cols<-c("Category","Installs","Type","Content.Rating", "Android.Ver", "Multi_Genre")
+for (i in cols){
+  data_clean[,i] <- as.factor(data_clean[,i])
+}
+
+# Después de los cambios, analizamos la nueva estructura del conjunto de datos
+str(data_clean)
+```
+
+## Análisis de outliers
+Las distribuciones de las variables numéricas de nuestro dataset no son gaussianas, tal y como podemos ver mediante los histogramas:
+
+```{r message= FALSE, warning=FALSE}
+plot_histogram(data_clean)
+```
+
+Las distribuciones son *positive skewed* menos *Rating*, que es *negative skewed*.
+
+Es por ello que para determinar los outliers de estas variables, utilizaremos la generalización de diagramas de cajas estandard (Vandervieren, E., Hubert, M. (2004) "An adjusted boxplot for skewed distributions"). Esta generalización tiene en cuenta la posible asimetría de los datos, que es lo que ocurre en nuestro caso.
+
+Este diagrama de cajas generalizado se encuentra implementado en R en la librería *robustbase*. En primer lugar, contaremos el número de *outliers* que detecta en cada variable numérica:
+
+```{r message= FALSE, warning=FALSE}
+library(robustbase)
+str(adjboxStats(data_clean$Rating)$out)
+str(adjboxStats(data_clean$Reviews)$out)
+str(adjboxStats(data_clean$Price)$out)
+str(adjboxStats(data_clean$Size)$out)
+```
+
+Observamos que la variable *Size* no tiene ningún *outlier*, y en contraste, se detectan 611, 423 y 744 *outliers* en las variables *Rating*, *Reviews* y *Price* respectivamente.
+
+A continuación, estudiaremos los diagramas de cajas de estas 3 variables.
+
+### Diagrama de cajas de Rating
+```{r message= FALSE, warning=FALSE}
+adjbox(data_clean$Rating, main = "Adjusted boxplot for Rating")
+```
+
+El diagrama de cajas muestra que todos los valores se encuentran entre 1 y 5, que es el rango posible de valores para *Rating*, por lo que no los consideraremos como *outliers*.
+
+### Diagrama de cajas de Reviews
+```{r message= FALSE, warning=FALSE}
+adjbox(data_clean$Reviews, main = "Adjusted boxplot for Reviews")
+
+head(data_clean[data_clean$Reviews > 10000000,])
+```
+
+Tras analizar los valores de reviews que han sido detectados como *outliers*, podemos concluir que corresponden a aplicaciones que como mínimo tienen 10 veces más instalaciones que *reviews*. En definitiva, los valores son correctos y no los descartaremos de nuestro dataset.
+
+
+### Diagrama de cajas de Price
+```{r message= FALSE, warning=FALSE}
+adjbox(data_clean$Price, main = "Adjusted boxplot for Price")
+
+head(data_clean[data_clean$Price > 200,])
+```
+
+Tras analizar los valores de precios más extremos, podemos concluir que los precios son deliberadamente caros y no se trata de ningún error, por lo que incluiremos estas aplicaciones en el dataset.
+
+# Análisis
+
+## Selección de los grupos de datos que se quieren analizar/comparar
+
+Con el objetivo de estudiar el comportamiento de la variable *Rating*, se han seleccionado los siguientes grupos:
+
++ **Category**: se estudiará la variación de las distribuciones de *Rating* en las diferentes categorías con la intención de verificar si el rating varía significativamente entre ellas.
++ **Type**: se estudiará si el hecho de que una aplicación sea de pago afecta significativamente al *rating*. ¿Se espera mayor calidad en una aplicación de pago?
+. **Multi_Genre**: se estudiará si el hecho de pertenecer a más de un género o no influye en el *rating* de la aplicación. 
+
+## Comprobación de la normalidad y homogeneidad de la varianza
+
+### Comprobación de normalidad
+
+A continuación, aplicaremos el test de Saphiro-Wilk para estudiar la normalidad de la variable *Rating*:
+
+```{r message= FALSE, warning=FALSE}
+#Realizamos una muestra puesto que el algoritmo no acepta más de 5000 datos
+shapiro.test(sample(data_clean$Rating, size = 4000))
+```
+
+El valor de p que obtenemos es muy bajo, por lo que la hipótesis nula queda rechazada, es decir, la variable *Rating* no sigue una distribución normal. Como hemos podido ver anteriormente en los histogramas, la variable *Rating* es asimétrica centrada en 4.2 aproximadamente.
+
+La normalidad también se puede comprobar visualmente empleando el gráfico de probabilidad normal. Este gráfico permite comparar una muestra de datos con la distribución normal. 
+```{r message= FALSE, warning=FALSE}
+qqnorm(data_clean$Rating)
+qqline(data_clean$Rating)
+```
+
+Como se puede observar, los puntos no siguen una línea recta lo cual indica que las calificaciones, como se ha demostrado previamente con el test Shapiro-Wilk, no siguen una distribución normal,
+
+### Comprobación de la homocedasticidad
+
+Puesto que nuestra variable objetivo no sigue una distribución normal, utilizaremos el test Fligner-Killeen para comprobar si las varianzas son homogenias entre las diferentes categorías de juegos, entre el tipo de aplicación (gratuita o de pago) y entre la variable *Multi_Genre*:
+
+```{r message= FALSE, warning=FALSE}
+#Category
+fligner.test(Rating ~ Category, data = data_clean)
+#Type
+fligner.test(Rating ~ Type, data = data_clean)
+#Multi-genre
+fligner.test(Rating ~ Multi_Genre, data = data_clean)
+```
+
+En el primer caso, se rechaza la hipótesis nula y se concluye que las varianzas no son homogénias en todas las categorías de juegos. Por otro lado, en el caso de *Type*, el valor de p es mayor que 0.05, por lo que podemos decir que las varianzas de *rating* son iguales tanto en las aplicaciones de pago, como en la gratuitas.
+
+Por último, también se rechaza la hipótesis nula en el caso de la variable *Multi_Genre*, es decir las varianzas son diferentes si el juego pertenece a más de una categoría o no. 
+
+
+## Pruebas estadísticas
+
+### Comparación entre dos grupos
+
+Puesto que la distribución de la variable *rating* no es normal, no podemos aplicar el test de t-student. En su lugar, se utilizará el test de Wilcoxon para determinar si las medias son iguales entre los dos grupos:
+
+#### Comparación entre paid y free
+
+```{r message= FALSE, warning=FALSE}
+wilcox.test(Rating ~ Type, data = data_clean )
+```
+
+Tras aplicar el test, el valor de p obtenido es muy pequeño, por lo que se rechaza la hipótesis nula y se determina que hay diferencias significativas entre la media de la valoración en el caso de una aplicación de pago y la media de una gratuita.
+
+#### Comparación entre multigénero y unigénero
+
+```{r message= FALSE, warning=FALSE}
+wilcox.test(Rating ~ Multi_Genre, data = data_clean )
+```
+
+Tras aplicar el test, el valor de p obtenido es inferior a 0.05 (significancia del 5%), por lo que se rechaza la hipótesis nula y se determina que hay diferencias significativas entre la media de la valoración en el caso de una aplicación multigénero y la media de una aplicación unigénero.
+
+
+### Comparación entre categorías
+
+El test de Kruskal-Wallis se trata de una alternativa no paramétrica del test ANOVA para trabajar con variables que no siguen una distribución normal. En el apartado 5 se visualizan las distribuciones de las calificaciones para cada una de las distintas categorías. Estas distribuciones son asimétricas (desplazadas hacia calificaciones altas) y por lo tanto no siguen una distribución normal de manera que el test ANOVA no podrá ser utilizado en este caso en particular. 
+
+Para realizar el test Kruskal se deben cumplir una serie de suposiciones. En primer lugar, las observaciones analizadas deben ser independientes y el número de grupos a a analizar debe ser mayor que 2 (en nuestro caso 33 grupos). En segundo lugar, la variable dependiente a evaluar debe ser continua (las calificaciones). Por último puntualizar que como se ha mencionado anteriormente la distribución de cada uno de los grupos no tiene porque ser normal. 
+
+Para aplicar el test en R se emplea la función kruskal.test() como se muestra a continuación. 
+
+```{r message= FALSE, warning=FALSE}
+kruskal.test(Rating ~ Category, data=data_clean)
+```
+El p-valor obtenido es menor al nivel de significancia (0,05), de manera que podemos concluir que las calificaciones muestran diferencias significativas para las distintas categorías. 
+
+### Creación de un modelo de regresión: Random forest
+
+En este apartado crearemos un modelo de regresión con el objetivo de intentar predecir las valoraciones de futuras aplicaciones. El modelo escogido es el Random forest. El random forest se basa en la construcción de varios árboles de decisión, escogiendo el promedio de los mismos para el modelo final. De esta forma se intenta evitar el sobreentrenamiento que suele ir asociado a los árboles de decisión, y así obtener mejores generalizaciones para futuros datos.
+
+Los árboles de decisión, en nuestro caso de regresión, predicen la variable variable objetivo a partir de los valores de las demás variables introducidas en el modelo. Los árboles se van dividiendo en ramas y hojas, que van afinando más el rango del valor que queremos predecir. Contra más profundidad tenga un árbol, más precisa será la predicción, pero también se corre el riesgo de sobreentrenar el modelo.
+
+Para la realización de nuestro modelo, se han excluído las variables: *App*, *Last.Updated*, *Genres* y *Current.Ver*, ya que aportaban un número excesivo de categorías.
+
+```{r message= FALSE, warning=FALSE}
+library(randomForest)
+library(caTools)
+set.seed(71)
+#Dividimos el dataset en 70% training y 30% test
+data1= sample.split(data_clean,SplitRatio = 0.3)
+
+#Obtenemos el train
+train =subset(data_clean,data1==TRUE)
+
+#obtenemos el test
+test =subset(data_clean,data1==FALSE)
+
+rf <- randomForest(Rating ~ Category + Reviews + Size + Installs + Type + Price + Content.Rating + Android.Ver + Multi_Genre, data = train)
+print(rf)
+```
+
+El modelo que hemos creado, tiene un error cuadrático medio de 0.25, lo cual no está diciendo que no se cometen muchos errores grandes, ya que estos tienen más peso cuando se calcula el error cuadrático medio.
+
+Adicionalmente, el porcentaje de varianza nos indica qué tanto porciento de la varianza de *Rating* puede ser explicada por nuestro modelo. En nuestro caso, este valor es 8.18%, un valor bastante bajo. Esto quiere decir, que para poder hacer predicciones más acertadas, necesitaríamos la inclusión de nuevas variables de las que no disponemos.
+
+```{r message= FALSE, warning=FALSE}
+pred <- predict(rf, newdata = test)
+residuals <- test$Rating - pred
+```
+
+
+```{r message= FALSE, warning=FALSE}
+library(ggplot2)
+
+fitting <- data.frame(pred, residuals)
+
+ggplot(fitting, aes(x=pred, y=residuals))+
+geom_point(alpha=0.1)+
+  xlab("Predicted Rating") +
+  ylab("Residual") +
+  ggtitle("Gráfica de residuales")+
+  theme(plot.title = element_text(hjust = 0.5),legend.position="right")
+```
+
+
+### Regresión lineal: Installs vs Reviews
+#### Conversión de installs
+```{r message= FALSE, warning=FALSE}
+
+data_clean$Installs <- lapply(data_clean$Installs, function(x) gsub("\\+", "", x))
+data_clean$Installs <- lapply(data_clean$Installs, function(x) gsub("\\,", "", x))
+data_clean$Installs <- as.numeric(data_clean$Installs)
+
+str(data_clean$Installs)
+```
+
+Antes de calcular el modelo de regresión lineal realizamos una conversión logarítmica de ambas variables. Para evitar tener problemas al calcular el logaritmo en base 10 de 0 (que daría lugar a infinito), añadimos una pequeña constante en ambas variables, ya que tanto Reviews como Installs contienen valores igual a 0. Una vez realizada la conversión logarítmica de ambas variables podemos aplicar el modelo de regresión lineal, como se muestra a continuación. 
+
+```{r message= FALSE, warning=FALSE}
+C=1
+
+modelo_lineal <-lm(log10(data_clean$Reviews+C)~log10(data_clean$Installs+C))
+
+summary(modelo_lineal)
+```
+
+El coeficiente de determinacion (R-square) es una medida de calidad del modelo y toma valores entre 0 y 1, siendo su valor mayor cuanto mayor es el ajuste del modelo a los datos.
+En este caso se obtiene un coeficiente de determinación de 0.9197 lo que demuestra que existe una relación lineal marcada entre el logaritmo en base 10 del número de instalaciones y el logaritmo en base 10 del número de review (log10(Reviews) vs log10(Installs)), como observaremos posteriormente mediante un diagrama de dispersión en el apartado de visualizaciones. Además se puede considerar el modelo lineal estadísticamente significate, ya que el p-valor obtenido es menor al nivel de significancia (0,05).
+
+Adicionalmente, se calcula el coeficiente de correlacion de Pearson, obteniendose un valor de 0.9590211. Lo que sugiere que existe una correlación lineal fuerte y positiva entre el logaritmo en base 10 de ambas variables (Installs y Reviews).
+
+```{r message= FALSE, warning=FALSE}
+cor(log10(data_clean$Reviews+C),log10(data_clean$Installs+C))
+```
+
+# Representacion de los resultados a partir de graficas y tablas
+## Instalar la libreria para la visualizacion
+
+```{r message= FALSE, warning=FALSE}
+library(gridExtra)
+library(GGally)
+library(dplyr)
+```
+
+
+## Distribucion de las puntuaciones
+La calificaciones de las apps en google play siguen una distribución asímetrica desplazada hacia puntuaciones mayores como se observa en el siguente histograma, con una mediana(4.3) ligeramente superior a la media (4.183223). 
+
+```{r message= FALSE, warning=FALSE}
+ggplot(data_clean, aes(x=Rating))+
+geom_histogram(binwidth= 0.2,color="darkblue", fill="blue", alpha=0.4)+
+  geom_vline(aes(xintercept = median(data_clean$Rating),
+                 color = "Median"), 
+             linetype = "solid",size=1.5) +
+  geom_vline(aes(xintercept = mean(data_clean$Rating), 
+                 color = "Mean"),linetype=2,size=1.5)+
+  xlab('Calificación')+
+  ylab('Número de apps')+
+  scale_color_hue(name = "Statistics")+
+  ggtitle("Calificación de las apps en Googleplay")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+## Matriz de correlaciones
+
+```{r message= FALSE, warning=FALSE}
+ggpairs(data_clean[, c(4, 5, 8, 3)], title="correlogram with ggpairs()") 
+
+```
+
+## Matriz de correlaciones
+
+```{r message= FALSE, warning=FALSE}
+ggcorr(data_clean, method = c("everything", "pearson"))  
+
+```
+
+## Diagramas de cajas de las categorias 
+Las calificaciones de las apps en google play siguen una distribución asimétrica (desplazada hacia calificaciones altas), de hecho la media de las calificaciones es superior a 4, siendo el rango posible de 0 a 5. En este apartado se muestra la distribución de las calificaciones para cada una de las categorías mediante diagramas de caja. Adicionalmente, se indica mediante un diamante la media para cada una de las categorías (33 en total). Como se muestra en la visualización todas las categorías presentan una distribución desplazada hacia puntuaciones elevadas. Además, todas ellas presentan una media en las calificaciones superior a 4 (como se demuestra posteriormente de manera analítica empleando la función aggregate). 
+
+```{r message= FALSE, warning=FALSE, fig.width = 10, fig.height=15}
+ggplot(data_clean,aes(x=Rating,y=Category))+
+  geom_boxplot() +
+  geom_point(aes(fill='Mean'),stat='summary',
+             fun.y=mean, shape = 23, size = 4) +
+  scale_fill_manual('', values = c("Mean"='blue')) + 
+  xlab("Rating") +
+  ylab("Category") +
+  ggtitle("Distribution of Ratings by Category")+
+  theme(plot.title = element_text(hjust = 0.5),legend.position="right")
+```
+
+El siguiente data frame contiene la media de las calificaciones para cada una de las categorías. Todas ellas presentan una media superior a 4, siendo dating (4.037) y arte y diseño (4.37) las categorias peor y mejor valoradas respectivamente.
+
+```{r message= FALSE, warning=FALSE}
+means_category <- aggregate(Rating ~ Category, data_clean, mean)
+
+means_category
+```
+
+
+```{r message= FALSE, warning=FALSE}
+print(min(means_category$Rating))
+
+means_category$Category[means_category$Rating==min(means_category$Rating)]
+```
+
+
+```{r message= FALSE, warning=FALSE}
+print(max(means_category$Rating))
+
+means_category$Category[means_category$Rating==max(means_category$Rating)]
+```
+
+## Distribucion de las calificaciones por categoria
+
+```{r message= FALSE, warning=FALSE, fig.width = 10, fig.height=60}
+ggplot(data_clean, aes(x=Rating))+
+geom_histogram(binwidth= 0.2,color="darkblue", fill="blue", alpha=0.4)+
+  facet_grid(rows=vars(Category))
+```
+
+## Numero de apps por categoria
+
+La siguiente gráfica muestra el número de apps disponibles en google play por categoría. Como se puede comprobar Family (19,4%), Game (9,8%) y Tools(8,6%) son las categorías predominantes en googleplay. Por el contrario, las apps dedicadas a belleza(0,05%), comics(0,06%) y art(0,06%) son las menos frecuentes. 
+
+```{r message= FALSE, warning=FALSE, fig.width = 10, fig.height=10}
+data_clean <- within(data_clean,
+Category <- factor(Category,
+levels=names(sort(table(Category),
+decreasing=FALSE))))
+
+ggplot(data_clean, aes(y=Category))+
+geom_bar(color="darkblue", fill="blue", alpha=0.4)+
+ggtitle("Number of apps per category")+
+theme(plot.title = element_text(hjust = 0.5))
+```
+
+La siguente tabla muestra las proporciones de cada una de las categorías
+
+```{r message= FALSE, warning=FALSE}
+
+round(prop.table(table(data_clean$Category)),digits=3)
+```
+
+## Distribucion de las calificaciones por tipo (free vs paid)
+
+En este apartado se analizan gráficamente las calificaciones de los dos tipos principales de apps: (1) gratuitas y (2) de pago. En primer lugar, se visualiza la distribución de las calificaciones para cada uno de los grupos mediante un histograma. En la siguiente imagen, ambas gráficas comparten en mismo eje x para de este manera realizar más fácilmente la comparación entre las distribuciones, sin embargo, rango del eje y es distinto. Como ya hemos comentado anteriormente en la etapa de preprocesamiento, la mayoría de las aplicaciones disponibles en google apps son gratuitas, por este motivo, utilizar el mismo rango para el eje y en ambas gráficas dificultaría compararlas. Las dos distribuciones son asimétricas con la cola a la izquierda de la distribución de manera que en ambos casos la media es inferior a la mediana, sin embargo, se observa un ligero mayor sesgo a la izquierda en el caso de las aplicaciones de pago, como posteriormente se podrá corroborar con los diagramas de caja de ambas distribuciones. 
+
+```{r message= FALSE, warning=FALSE, fig.width = 10, fig.height=8}
+ggplot(data_clean, aes(x=Rating))+
+geom_histogram(binwidth= 0.2,color="darkblue", fill="blue", alpha=0.4)+
+  facet_grid(rows=vars(Type),
+  scales="free_y")+
+  ggtitle("Distribución de las calificaciones por tipo")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+La siguiente visualización muestra el diagrama de caja de ambos tipos de apps: (1) gratuitas y (2) de pago. El diagrama de caja de las puntuaciones muestra que las apps de pago presentan una distribución más desplazada hacia la derecha, presentando tanto una media como una mediana mayor que la distribución de la apps gratuitas. Por otra parte, esta gráfica también permite observar que la distribución de las calificaciones es asimétrica para los dos tipos de apps ya que la mediana es superior a la media en ambos casos.  
+
+```{r message= FALSE, warning=FALSE, fig.width = 10, fig.height=5}
+
+data_clean$Type <- factor(data_clean$Type , levels=c("Paid", "Free"), ordered=TRUE)
+
+ggplot(data_clean,aes(x=Rating,y=Type))+
+  geom_boxplot() +
+  geom_point(aes(fill='Mean'),stat='summary',
+             fun.y=mean, shape = 23, size = 4) +
+  scale_fill_manual('', values = c("Mean"='blue')) + 
+  xlab("Rating") +
+  ylab("Type") +
+  ggtitle("Distribution de las calificaciones por tipo")+
+  theme(plot.title = element_text(hjust = 0.5),legend.position="right")
+```
+
+## Distribucion de las calificaciones por presencia o no de Multigénero
+En el apartado de integración y selección de los datos habíamos creado una variable categórica llamada Multi_Genre para indicar si la app en cuestión pertenece a un solo género (valor 0), o por el contrario, se puede asociar a múltiples géneros (valor 1).
+
+La función summary nos permite obtener un resumen estadístico de la variable de interés, en este caso Multi_Genre. Tras aplicar la función, se puede concluir que la gran mayoría de las apps pertenecen a un solo género (95.935%), como se muestra en la tabla inferior.
+
+```{r message= FALSE, warning=FALSE}
+summary(data_clean$Multi_Genre)
+```
+
+En relación a la distribución de los datos, se observa una vez más que las calificaciones de ambos grupos se encuentran desplazadas hacia la derecha (puntuaciones elevadas), sin embargo, las aplicaciones multigénero presentan una media ligeramente superior que las aplicaciones de un solo genero. Además, se observa también que las aplicaciones multigénero presentan un menor número de outliers. Este hecho tiene cierta lógica ya que al estar disponible un menor número de apps multigénero en el mercado existe una probabilidad menor de que existan apps de muy baja calidad que generen el rechazo del público.
+
+```{r message= FALSE, warning=FALSE, fig.width = 10, fig.height=5}
+ggplot(data_clean,aes(x=Rating,y=Multi_Genre))+
+  geom_boxplot() +
+  geom_point(aes(fill='Mean'),stat='summary',
+             fun.y=mean, shape = 23, size = 4) +
+  scale_fill_manual('', values = c("Mean"='red')) + 
+  xlab("Rating") +
+  ylab("Type") +
+  ggtitle("Distribution de las calificaciones por presencia o no de multigénero")+
+  theme(plot.title = element_text(hjust = 0.5),legend.position="right")
+```
+
+## Diagrama de dispersión (Reviews vs Installs)
+La siguente gráfica muestra el diagrama de dispersión del logaritmo en base 10 del número de reviews vs el logaritmo en base 10 del número de instalaciones. La variable instalaciones se proporciona en el conjunto de datos de manera discreta. Además, el número de visualizaciones observadas es relativamente alto (9644), por este motivo, se deben empleara las técnicas de jitter y transparencia para evitar el overplotting de los datos y visualizar de esta manera mejor los resultado.
+
+
+```{r message= FALSE, warning=FALSE, fig.width = 10, fig.height=5}
+ggplot(data_clean,aes(x=log10(Installs+1),y=log10(Reviews+1)))+
+  geom_point(color="darkblue", fill="blue", alpha=0.1, position = "jitter")+
+  geom_smooth(method = "lm", se = FALSE, col='red')+
+  ggtitle("Relación entre el número de instalaciones y el número de reviews")+
+  theme(plot.title = element_text(hjust = 0.5),legend.position="right")
+
+```
+
+Como hemos comentado anteriormente existe una relación lineal fuerte y positiva entre el logaritmo en base 10 de ambas variables, representada por la siguiente ecuación: log10(y)= -1.30069 + 0.918176 * log10(x). Esta línea de regresión se puede visualizar en rojo en el gráfico anterior.
+
+# Conclusiones
+
++ La variable *Rating* no sigue una distribución normal, esto ha sido demostrado mediante el test de Saphiro-Wilk. La distribución que le corresponde a la variable *Rating* es una asimétrica negativa, es decir, la cola a la izquierda del pico es mayor que la cola del lado opuesto. Esta distribución presenta una media cercana a 4.2, lo que en general nos indica que las valoraciones de las aplicaciones son altas.
+
++ Se ha determinado, mediante el test de Fligner-Killeen, que las variables *Category* y *Multi_genre* no tienen varianzas homogénias entre sus categorías. Por el contrario, la variable *Type*, muestra varianzas homogénias entre sus grupos ("Paid" y "Free").
+
++ Se ha comprobado mediante el test de Wilcoxon que tanto la variable *Type* como la variable *Multi_Genre* presentan medias de rating diferentes en sus dos grupos ("Paid" y "Free"; "yes" y "no"). Se observan medias de *rating* más altas cuando la aplicación es de pago. Adicionalmente, se ha observado que las aplicaciones con multigénero tienen medias de *rating* más elevadas que cuando son unigénero.
+
++ Las diferentes categorías de aplicaciones muestran, mediante el test Kruskal-Wallis, diferencias significativas en sus *mean ranks*. Las medias varían entre 4.37 (*ART_AND_DESIGN*) y 4.04 (*DATING*).
+
++ Un modelo de random forest consigue explicar el 8% de la varianza de *Rating*, lo que se considera como mal modelo. Para una mayor precisión, se deberían incluir más variables en el conjunto de datos que se correlacionen de forma más directa con *Rating*.
+
++ Se observa una relación lineal entre el número de *installs* y el número de *reviews* con un coeficiente de determinación de 0.83.
+
+
+
+
+
+
