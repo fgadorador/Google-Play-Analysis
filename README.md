@@ -11,4 +11,4 @@ En la carpeta **Scripts** se encuentra el código del proyecto:
 
 Fuera de la carpeta tenemos los siguientes ficheros:
 - **googleplaystore.csv**: este el fichero csv que contiene los datos a preprocesar y analizar.
-- **Practica2_tipología.pdf*: este es el pdf donde se recogen las respuestas al enunciado de la Práctica 2.
+- **Practica2_tipología.pdf**: este es el pdf donde se recogen las respuestas al enunciado de la Práctica 2.
