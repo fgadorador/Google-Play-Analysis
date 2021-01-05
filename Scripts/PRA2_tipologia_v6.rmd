@@ -280,6 +280,13 @@ head(data_clean[data_clean$Price > 200,])
 
 Tras analizar los valores de precios más extremos, podemos concluir que los precios son deliberadamente caros y no se trata de ningún error, por lo que incluiremos estas aplicaciones en el dataset.
 
+## Creación de fichero preprocesado
+
+```{r message= FALSE, warning=FALSE}
+
+write.csv(data_clean, 'googleplay_clean.csv')
+```
+
 # Análisis
 
 ## Selección de los grupos de datos que se quieren analizar/comparar
