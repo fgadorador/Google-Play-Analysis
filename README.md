@@ -10,5 +10,6 @@ En la carpeta **Scripts** se encuentra el código del proyecto:
 - **PRA2_tipología_v6.rmd**: Este es el fichero que contiene el código del proyecto en formato r markdown.
 
 Fuera de la carpeta tenemos los siguientes ficheros:
-- **googleplaystore.csv**: este el fichero csv que contiene los datos a preprocesar y analizar.
+- **googleplaystore.csv**: este es el fichero csv que contiene los datos a preprocesar y analizar.
+- **googleplay_clean.csv**: este es el fichero que hemos generado tras haber aplicado todos los pasos del preprocesamiento.
 - **Practica2_tipología.pdf**: este es el pdf donde se recogen las respuestas al enunciado de la Práctica 2.
